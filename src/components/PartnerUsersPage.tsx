@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
-import { X, LayoutDashboard, Users, FileText, TextSelection as Collection, Zap, Scan, Eye, Heart, Pencil } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { X, LayoutDashboard, Users, FileText, TextSelection as Collection, Zap, Scan, Eye, Heart, Pencil, Search, ArrowUpDown } from 'lucide-react';
 import { Partner } from '../types';
 import { generatePastelColor } from '../utils/colorUtils';
 import { EditCollectionModal } from './EditCollectionModal';
 import { EditActivationModal } from './EditActivationModal';
+import { UserAccountPage } from './UserAccountPage';
 
 interface PartnerUsersPageProps {
   partner: Partner;
@@ -25,6 +26,11 @@ interface PartnerUser {
   is_active: boolean;
 }
 
+interface ExtendedUser extends PartnerUser {
+  description?: string;
+  username?: string;
+}
+
 interface TopCollection {
   id: string;
   title: string;
@@ -42,6 +48,14 @@ interface TopActivation {
   scans: number;
   views: number;
   likes: number;
+}
+
+type SortField = 'collections' | 'activations' | 'scans' | 'views' | 'likes';
+type SortDirection = 'asc' | 'desc';
+
+interface SortConfig {
+  field: SortField;
+  direction: SortDirection;
 }
 
 // Mock data for partner users
@@ -111,17 +125,62 @@ export const PartnerUsersPage: React.FC<PartnerUsersPageProps> = ({
   const [selectedActivation, setSelectedActivation] = useState<TopActivation | null>(null);
   const [isEditCollectionModalOpen, setIsEditCollectionModalOpen] = useState(false);
   const [isEditActivationModalOpen, setIsEditActivationModalOpen] = useState(false);
-  const usersPerPage = 8;
+  const [searchTerm, setSearchTerm] = useState('');
+  const [sortConfig, setSortConfig] = useState<SortConfig>({ field: 'collections', direction: 'desc' });
+  const [selectedUser, setSelectedUser] = useState<ExtendedUser | null>(null);
+  const usersPerPage = 7;
 
   const handleUserSummaryClick = () => {
     onNavigate('dashboard');
   };
 
+  // Filter and sort users
+  const filteredAndSortedUsers = useMemo(() => {
+    let result = [...mockUsers];
+
+    // Apply search filter
+    if (searchTerm) {
+      const searchLower = searchTerm.toLowerCase();
+      result = result.filter(user => 
+        user.name.toLowerCase().includes(searchLower) ||
+        user.email.toLowerCase().includes(searchLower)
+      );
+    }
+
+    // Apply sorting
+    result.sort((a, b) => {
+      const fieldMap = {
+        collections: 'collections_count',
+        activations: 'activations_count',
+        scans: 'scans_count',
+        views: 'views_count',
+        likes: 'likes_count'
+      };
+      
+      const field = fieldMap[sortConfig.field];
+      const aValue = a[field];
+      const bValue = b[field];
+      
+      return sortConfig.direction === 'asc'
+        ? aValue - bValue
+        : bValue - aValue;
+    });
+
+    return result;
+  }, [mockUsers, searchTerm, sortConfig]);
+
   // Calculate pagination
   const indexOfLastUser = currentPage * usersPerPage;
   const indexOfFirstUser = indexOfLastUser - usersPerPage;
-  const currentUsers = mockUsers.slice(indexOfFirstUser, indexOfLastUser);
-  const totalPages = Math.ceil(mockUsers.length / usersPerPage);
+  const currentUsers = filteredAndSortedUsers.slice(indexOfFirstUser, indexOfLastUser);
+  const totalPages = Math.ceil(filteredAndSortedUsers.length / usersPerPage);
+
+  const handleSort = (field: SortField) => {
+    setSortConfig(prev => ({
+      field,
+      direction: prev.field === field && prev.direction === 'desc' ? 'asc' : 'desc'
+    }));
+  };
 
   const handleEditCollection = (collection: TopCollection) => {
     setSelectedCollection(collection);
@@ -145,11 +204,52 @@ export const PartnerUsersPage: React.FC<PartnerUsersPageProps> = ({
     setSelectedActivation(null);
   };
 
+  if (selectedUser) {
+    return (
+      <UserAccountPage
+        user={{
+          id: selectedUser.id,
+          name: selectedUser.name,
+          email: selectedUser.email,
+          avatar_url: selectedUser.avatar_url,
+          partner_id: partner.id,
+          collections_count: selectedUser.collections_count,
+          activations_count: selectedUser.activations_count,
+          scans_count: selectedUser.scans_count,
+          views_count: selectedUser.views_count,
+          likes_count: selectedUser.likes_count,
+          is_active: selectedUser.is_active,
+          created_at: new Date().toISOString(),
+          description: selectedUser.description || '',
+          username: selectedUser.username || selectedUser.email.split('@')[0],
+        }}
+        onClose={() => setSelectedUser(null)}
+        onDashboardClick={onDashboardClick}
+      />
+    );
+  }
+
+  const SortButton = ({ field, label, icon }: { field: SortField; label: string; icon: React.ReactNode }) => (
+    <button
+      onClick={() => handleSort(field)}
+      className={`flex items-center space-x-1 px-2 py-1 rounded hover:bg-gray-100 ${
+        sortConfig.field === field ? 'text-blue-600 font-medium' : 'text-gray-600'
+      }`}
+    >
+      {icon}
+      <span className="text-sm">{label}</span>
+      <ArrowUpDown className={`w-4 h-4 ${
+        sortConfig.field === field ? 'text-blue-600' : 'text-gray-400'
+      }`} />
+    </button>
+  );
+
   const UserRow = ({ user }: { user: PartnerUser }) => (
     <div
+      onClick={() => user.is_active && setSelectedUser(user)}
       className={`p-4 rounded-lg transition-all duration-200 border border-gray-100 ${
         user.is_active 
-          ? 'bg-white hover:shadow-md' 
+          ? 'bg-white hover:shadow-md cursor-pointer' 
           : 'bg-gray-50 opacity-75'
       }`}
     >
@@ -304,31 +404,86 @@ export const PartnerUsersPage: React.FC<PartnerUsersPageProps> = ({
           {/* Left Column - User List */}
           <div className="space-y-6">
             <div className="bg-white rounded-lg shadow p-6">
-              <h3 className="text-xl font-semibold mb-4">Partner Users</h3>
-              <div className="space-y-3">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-xl font-semibold">Partner Users</h3>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                  <input
+                    type="text"
+                    placeholder="Search users..."
+                    value={searchTerm}
+                    onChange={(e) => {
+                      setSearchTerm(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                    className="pl-9 pr-4 py-2 w-64 border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              {/* Sort Controls */}
+              <div className="flex items-center space-x-4 mb-4 pb-4 border-b">
+                <span className="text-sm text-gray-500">Sort by:</span>
+                <SortButton
+                  field="collections"
+                  label="Collections"
+                  icon={<Collection className="w-4 h-4 text-purple-600" />}
+                />
+                <SortButton
+                  field="activations"
+                  label="Activations"
+                  icon={<Zap className="w-4 h-4 text-amber-600" />}
+                />
+                <SortButton
+                  field="scans"
+                  label="Scans"
+                  icon={<Scan className="w-4 h-4 text-blue-600" />}
+                />
+                <SortButton
+                  field="views"
+                  label="Views"
+                  icon={<Eye className="w-4 h-4 text-emerald-600" />}
+                />
+                <SortButton
+                  field="likes"
+                  label="Likes"
+                  icon={<Heart className="w-4 h-4 text-rose-600" />}
+                />
+              </div>
+
+              <div className="space-y-2">
                 {currentUsers.map((user) => (
                   <UserRow key={user.id} user={user} />
                 ))}
               </div>
 
+              {/* Show "No results" message when search yields no results */}
+              {currentUsers.length === 0 && (
+                <div className="text-center py-8">
+                  <p className="text-gray-500">No users found matching your search.</p>
+                </div>
+              )}
+
               {/* Pagination */}
-              <div className="flex justify-center items-center space-x-2 mt-6">
-                <button
-                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                  disabled={currentPage === 1}
-                  className="px-3 py-1 rounded-lg border border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-                >
-                  Previous
-                </button>
-                {renderPagination()}
-                <button
-                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                  disabled={currentPage === totalPages}
-                  className="px-3 py-1 rounded-lg border border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-                >
-                  Next
-                </button>
-              </div>
+              {currentUsers.length > 0 && (
+                <div className="flex justify-center items-center space-x-2 mt-6">
+                  <button
+                    onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                    disabled={currentPage === 1}
+                    className="px-3 py-1 rounded-lg border border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                  >
+                    Previous
+                  </button>
+                  {renderPagination()}
+                  <button
+                    onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                    disabled={currentPage === totalPages}
+                    className="px-3 py-1 rounded-lg border border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                  >
+                    Next
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
